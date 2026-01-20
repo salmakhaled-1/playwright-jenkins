@@ -1,33 +1,93 @@
+
 pipeline {
     agent any
 
-    stages {
+    options {
+        // Keep logs readable
+        ansiColor('xterm')
+        timestamps()
+        // Use the default built-in checkout only
+        // (Remove if you decide to do a manual checkout stage)
+        // skipDefaultCheckout(true)
+    }
 
-        stage('Get Code') {
+    environment {
+        VENV_DIR   = 'venv'
+        TEST_REPORT = 'report.html'
+    }
+
+    stages {
+        stage('Checkout') {
             steps {
-                git branch: 'main',
-                    url: 'https://github.com/salmakhaled-1/playwright-jenkins.git'
+                   url: 'https://github.com/salmakhaled-1/playwright-jenkins.git'
+                checkout scm
             }
         }
 
-        stage('Install Dependencies') {
+        stage('Set up Python venv (Windows)') {
             steps {
-                bat '''
-                python -m venv venv
-                . venv\\Scripts\\activate
-                pip install -r requirements.txt
-                playwright install
+                powershell '''
+                    $ErrorActionPreference = "Stop"
+
+                    # Confirm Python exists
+                    python --version
+
+                    # Create venv if not present
+                    if (!(Test-Path ".\\\\${env:VENV_DIR}")) {
+                        python -m venv "${env:VENV_DIR}"
+                    }
+
+                    # Activate venv and upgrade pip
+                    . ".\\\\${env:VENV_DIR}\\\\Scripts\\\\Activate.ps1"
+                    python -m pip install --upgrade pip
+
+                    # Install deps
+                    if (Test-Path ".\\\\requirements.txt") {
+                        pip install -r requirements.txt
+                    } else {
+                        Write-Host "requirements.txt not found – skipping"
+                    }
+
+                    # Install Playwright + browsers
+                    pip install playwright
+                    python -m playwright install --with-deps
                 '''
             }
         }
 
         stage('Run Tests') {
             steps {
-                bat '''
-                . venv\\Scripts\\activate
-                pytest
+                powershell '''
+                    $ErrorActionPreference = "Stop"
+                    . ".\\\\${env:VENV_DIR}\\\\Scripts\\\\Activate.ps1"
+
+                    if (!(Test-Path ".\\\\artifacts")) {
+                        New-Item -ItemType Directory -Path ".\\\\artifacts" | Out-Null
+                    }
+
+                    # Run pytest and generate a self-contained HTML report
+                    pytest -q --maxfail=1 --disable-warnings --html="${env:TEST_REPORT}" --self-contained-html
                 '''
             }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'report.html, artifacts/**', fingerprint: true, allowEmptyArchive: true
+
+            // Optional: HTML Publisher plugin (uncomment if installed)
+            // publishHTML(target: [
+            //   allowMissing: true,
+            //   alwaysLinkToLastBuild: true,
+            //   keepAll: true,
+            //   reportDir: '.',
+            //   reportFiles: "${env.TEST_REPORT}",
+            //   reportName: 'Playwright Test Report'
+            // ])
+        }
+        failure {
+            echo 'Build failed. Check console log & archived artifacts for details.'
         }
     }
 }
