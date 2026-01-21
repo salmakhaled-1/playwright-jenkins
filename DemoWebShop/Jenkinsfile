@@ -17,9 +17,15 @@ pipeline {
         stage('Run Tests') {
             steps {
                 powershell '''
-                    .\\venv\\Scripts\\python -m pytest
+                    .\\venv\\Scripts\\python -m pytest --html=report.html --self-contained-html
                 '''
             }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts 'report.html'
         }
     }
 }
